@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grand Impiana Hotel KL — Room Booking System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: { 50: '#ecfdf5', 100: '#d1fae5', 500: '#10b981', 600: '#059669', 700: '#047857' },
+                        slate: { 850: '#1e293b' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .fade-in { animation: fadeIn 0.25s ease-out both; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .slide-in { animation: slideIn 0.2s ease-out both; }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+        .room-card { transition: transform 0.2s, box-shadow 0.2s; }
+        .room-card:hover { transform: translateY(-3px); box-shadow: 0 12px 24px -8px rgba(0,0,0,0.15); }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased">
+
+<!-- ==================== APP SHELL ==================== -->
+<div id="app">
+    <!-- Auth View -->
+    <div id="auth-view" class="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 via-slate-50 to-slate-200 p-4"></div>
+
+    <!-- Main Application -->
+    <div id="main-view" class="hidden min-h-screen flex flex-col md:flex-row">
+        <!-- Sidebar -->
+        <aside class="w-full md:w-64 bg-slate-900 text-white flex-shrink-0 flex flex-col">
+            <div class="p-6 border-b border-slate-700">
+                <div class="flex items-center gap-3">
+                    <div class="p-2 bg-primary-600 rounded-lg">
+                        <i data-lucide="building-2" class="w-6 h-6 text-white"></i>
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-lg leading-tight">Grand Impiana</h1>
+                        <p class="text-xs text-slate-400">Kuala Lumpur</p>
+                    </div>
+                </div>
+            </div>
+            <nav class="flex-1 overflow-y-auto p-4 space-y-1" id="sidebar-nav"></nav>
+            <div class="p-4 border-t border-slate-700">
+                <div class="flex items-center gap-3 mb-3">
+                    <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center">
+                        <i data-lucide="user" class="w-4 h-4 text-slate-300"></i>
+                    </div>
+                    <div class="overflow-hidden">
+                        <p class="text-sm font-medium truncate" id="sidebar-username">Guest</p>
+                        <p class="text-xs text-slate-400 truncate" id="sidebar-role">Role</p>
+                    </div>
+                </div>
+                <button onclick="handleLogout()" class="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
+                    <i data-lucide="log-out" class="w-4 h-4"></i>
+                    Sign Out
+                </button>
+            </div>
+        </aside>
+
+        <!-- Content Area -->
+        <main class="flex-1 flex flex-col h-screen overflow-hidden">
+            <!-- Top Bar -->
+            <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 flex-shrink-0">
+                <div class="flex items-center gap-3">
+                    <button onclick="toggleMobileSidebar()" class="md:hidden p-2 hover:bg-slate-100 rounded-lg">
+                        <i data-lucide="menu" class="w-5 h-5"></i>
+                    </button>
+                    <h2 class="text-xl font-semibold text-slate-800" id="page-title">Dashboard</h2>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-primary-100 text-primary-700">
+                        <i data-lucide="shield-check" class="w-3 h-3"></i>
+                        <span id="header-role-badge">Admin</span>
+                    </span>
+                </div>
+            </header>
+
+            <!-- Scrollable Content -->
+            <div class="flex-1 overflow-y-auto p-4 md:p-6" id="content-area"></div>
+        </main>
+    </div>
+</div>
+
+<!-- Toast Container -->
+<div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2 pointer-events-none"></div>
+
+<!-- Modal Overlay -->
+<div id="modal-overlay" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 hidden flex items-center justify-center p-4 opacity-0 transition-opacity duration-200"></div>
+
+<script>
+/* ================================================================
+   CONFIGURATION & CONSTANTS (translated from C++)
+   ================================================================ */
+const CONFIG = {
+    MAX_ROOMS: 20,
+    MAX_BOOKINGS: 20,
+    MAX_USERS: 10,
+    RATE_PER_NIGHT: 150.00,
+    ADMIN_USERNAME: 'admin',
+    ADMIN_PASSWORD: 'admin123',
+    DB_KEY: 'hotel_booking_db_v1'
+};
+
+/* ================================================================
+   STATE
+   ================================================================ */
+let state = {
+    user: null,           // { id, username, role }
+    view: 'auth',         // auth | dashboard | rooms | bookings | book
+    toastId: 0
+};
+
+/* ================================================================
+   DATABASE (localStorage)
+   ================================================================ */
+function initDB() {
+    if (localStorage.getItem(CONFIG.DB_KEY)) return;
+    const initial = {
+        users: [
+            { id: 1, username: 'admin', password: 'admin123', role: 'admin', createdAt: Date.now() }
+        ],
+        rooms: [
+            { id: 1, number: 101, active: true, maintenance: false },
+            { id: 2, number: 102, active: true, maintenance: false },
+            { id: 3, number: 103, active: true, maintenance: false },
+            { id: 4, number: 104, active: true, maintenance: false },
+            { id: 5, number: 105, active: true, maintenance: false }
+        ],
+        bookings: [],
+        sequences: { roomId: 6, bookingId: 1, userId: 2 }
+    };
+    localStorage.setItem(CONFIG.DB_KEY, JSON.stringify(initial));
+}
+
+function getDB() {
+    return JSON.parse(localStorage.getItem(CONFIG.DB_KEY));
+}
+
+function saveDB(db) {
+    localStorage.setItem(CONFIG.DB_KEY, JSON.stringify(db));
+}
+
+/* ================================================================
+   DATE UTILITIES (preserving C++ logic)
+   ================================================================ */
+// C++: yyyy*365 + mm*30 + dd
+function dateToDays(dateStr) {
+    // dateStr = DD/MM/YYYY
+    if (!dateStr || dateStr.length < 10) return 0;
+    const dd = parseInt(dateStr.substr(0, 2), 10);
+    const mm = parseInt(dateStr.substr(3, 2), 10);
+    const yyyy = parseInt(dateStr.substr(6, 4), 10);
+    return yyyy * 365 + mm * 30 + dd;
+}
+
+// C++: daysToDate
+function daysToDate(totalDays) {
+    let yyyy = Math.floor(totalDays / 365);
+    let rem = totalDays % 365;
+    let mm = Math.floor(rem / 30);
+    let dd = rem % 30;
+    if (dd === 0) { dd = 30; mm--; }
+    if (mm === 0) { mm = 12; yyyy--; }
+    return `${String(dd).padStart(2,'0')}/${String(mm).padStart(2,'0')}/${yyyy}`;
+}
+
+// C++: getCheckoutDate
+function getCheckoutDate(checkin, days) {
+    const start = dateToDays(checkin);
+    const end = start + days; // C++ logic preserved
+    return daysToDate(end);
+}
+
+// C++: checkDateOverlap
+function checkDateOverlap(date1, days1, date2, days2) {
+    const start1 = dateToDays(date1);
+    const end1 = start1 + days1;
+    const start2 = dateToDays(date2);
+    const end2 = start2 + days2;
+    return (start1 < end2) && (start2 < end1);
+}
+
+// C++: hasBookingConflict
+function hasBookingConflict(roomId, dateStr, days, ignoreBookingId = -1) {
+    const db = getDB();
+    return db.bookings.some(b => {
+        if (!b.active || b.id === ignoreBookingId) return false;
+        if (b.roomId !== roomId) return false;
+        return checkDateOverlap(b.checkIn, b.days, dateStr, days);
+    });
+}
+
+// HTML date input (YYYY-MM-DD) <-> DD/MM/YYYY
+function fromISODate(iso) {
+    if (!iso) return '';
+    const [y, m, d] = iso.split('-');
+    return `${d}/${m}/${y}`;
+}
+function toISODate(dmY) {
+    if (!dmY) return '';
+    const [d, m, y] = dmY.split('/');
+    return `${y}-${m}-${d}`;
+}
+
+function todayDMY() {
+    const now = new Date();
+    return `${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')}/${now.getFullYear()}`;
+}
+
+function todayISO() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+}
+
+/* ================================================================
+   AUTHENTICATION
+   ================================================================ */
+function login(username, password) {
+    const db = getDB();
+    const user = db.users.find(u => u.username === username && u.password === password);
+    if (!user) return null;
+    return { id: user.id, username: user.username, role: user.role };
+}
+
+function registerAccount(username, password) {
+    const db = getDB();
+    if (db.users.length >= CONFIG.MAX_USERS) return { ok: false, msg: 'User account limit reached (max 10).' };
+    if (!username || !password) return { ok: false, msg: 'Username and password cannot be empty.' };
+    if (username === 'admin') return { ok: false, msg: 'Username "admin" is reserved.' };
+    if (db.users.some(u => u.username === username)) return { ok: false, msg: 'Username already exists.' };
+    
+    const newUser = {
+        id: db.sequences.userId++,
+        username,
+        password,
+        role: 'user',
+        createdAt: Date.now()
+    };
+    db.users.push(newUser);
+    saveDB(db);
+    return { ok: true, msg: 'Account created successfully!' };
+}
+
+/* ================================================================
+   ROOM MANAGEMENT
+   ================================================================ */
+function getActiveRooms() {
+    return getDB().rooms.filter(r => r.active);
+}
+
+function addRoom(number) {
+    const db = getDB();
+    if (db.rooms.filter(r => r.active).length >= CONFIG.MAX_ROOMS) {
+        return { ok: false, msg: `Room limit reached (max ${CONFIG.MAX_ROOMS}).` };
+    }
+    if (db.rooms.some(r => r.active && r.number === number)) {
+        return { ok: false, msg: `Room ${number} already exists.` };
+    }
+    db.rooms.push({
+        id: db.sequences.roomId++,
+        number,
+        active: true,
+        maintenance: false
+    });
+    saveDB(db);
+    return { ok: true, msg: `Room ${number} added successfully.` };
+}
+
+function toggleMaintenance(roomId) {
+    const db = getDB();
+    const room = db.rooms.find(r => r.id === roomId && r.active);
+    if (!room) return { ok: false, msg: 'Room not found.' };
+    room.maintenance = !room.maintenance;
+    saveDB(db);
+    return { ok: true, msg: `Room ${room.number} maintenance is now ${room.maintenance ? 'ON' : 'OFF'}.` };
+}
+
+/* ================================================================
+   BOOKING MANAGEMENT
+   ================================================================ */
+function getAllBookings() {
+    const db = getDB();
+    return db.bookings.filter(b => b.active).map(b => enrichBooking(b, db));
+}
+
+function getMyBookings(username) {
+    return getAllBookings().filter(b => b.bookedBy === username);
+}
+
+function enrichBooking(booking, db) {
+    const room = db.rooms.find(r => r.id === booking.roomId);
+    return {
+        ...booking,
+        roomNumber: room ? room.number : '???',
+        checkOut: getCheckoutDate(booking.checkIn, booking.days),
+        statusLabel: room?.maintenance ? 'Room Maintenance' : 'Confirmed'
+    };
+}
+
+function createBooking({ roomId, guestName, checkIn, days, bookedBy }) {
+    const db = getDB();
+    if (db.bookings.filter(b => b.active).length >= CONFIG.MAX_BOOKINGS) {
+        return { ok: false, msg: `Booking limit reached (max ${CONFIG.MAX_BOOKINGS}).` };
+    }
+    const room = db.rooms.find(r => r.id === roomId && r.active);
+    if (!room) return { ok: false, msg: 'Room does not exist.' };
+    if (room.maintenance) return { ok: false, msg: 'Room is under maintenance.' };
+    if (hasBookingConflict(roomId, checkIn, days)) {
+        return { ok: false, msg: 'Room is not available for those dates.' };
+    }
+    
+    const booking = {
+        id: db.sequences.bookingId++,
+        roomId,
+        guestName,
+        checkIn,
+        days,
+        totalBill: days * CONFIG.RATE_PER_NIGHT,
+        active: true,
+        bookedBy,
+        createdAt: Date.now()
+    };
+    db.bookings.push(booking);
+    saveDB(db);
+    return { ok: true, msg: 'Booking successful!', booking: enrichBooking(booking, db) };
+}
+
+function updateBooking(bookingId, updates) {
+    const db = getDB();
+    const idx = db.bookings.findIndex(b => b.id === bookingId && b.active);
+    if (idx === -1) return { ok: false, msg: 'Booking not found.' };
+    
+    const b = db.bookings[idx];
+    const newRoomId = updates.roomId !== undefined ? updates.roomId : b.roomId;
+    const newDate = updates.checkIn !== undefined ? updates.checkIn : b.checkIn;
+    const newDays = updates.days !== undefined ? updates.days : b.days;
+    
+    const room = db.rooms.find(r => r.id === newRoomId && r.active);
+    if (!room) return { ok: false, msg: 'Invalid room number.' };
+    if (room.maintenance) return { ok: false, msg: 'Selected room is under maintenance.' };
+    if (hasBookingConflict(newRoomId, newDate, newDays, bookingId)) {
+        return { ok: false, msg: 'Conflict detected with existing booking for those dates.' };
+    }
+    
+    db.bookings[idx] = {
+        ...b,
+        roomId: newRoomId,
+        checkIn: newDate,
+        days: newDays,
+        guestName: updates.guestName !== undefined ? updates.guestName : b.guestName,
+        totalBill: newDays * CONFIG.RATE_PER_NIGHT
+    };
+    saveDB(db);
+    return { ok: true, msg: 'Booking updated successfully.', booking: enrichBooking(db.bookings[idx], db) };
+}
+
+function cancelBooking(bookingId) {
+    const db = getDB();
+    const b = db.bookings.find(bk => bk.id === bookingId && bk.active);
+    if (!b) return { ok: false, msg: 'Booking not found.' };
+    b.active = false;
+    saveDB(db);
+    return { ok: true, msg: 'Booking cancelled successfully.' };
+}
+
+/* ================================================================
+   UI HELPERS
+   ================================================================ */
+function refreshIcons() {
+    if (window.lucide) lucide.createIcons();
+}
+
+function showToast(message, type = 'success') {
+    const container = document.getElementById('toast-container');
+    const id = ++state.toastId;
+    const colors = {
+        success: 'bg-emerald-600 text-white',
+        error: 'bg-rose-600 text-white',
+        warning: 'bg-amber-500 text-white',
+        info: 'bg-blue-600 text-white'
+    };
+    const icons = {
+        success: 'check-circle', error: 'x-circle', warning: 'alert-triangle', info: 'info'
+    };
+    const el = document.createElement('div');
+    el.className = `${colors[type]} px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 min-w-[280px] pointer-events-auto fade-in`;
+    el.innerHTML = `
+        <i data-lucide="${icons[type]}" class="w-5 h-5 flex-shrink-0"></i>
+        <p class="text-sm font-medium">${escapeHtml(message)}</p>
+    `;
+    container.appendChild(el);
+    refreshIcons();
+    setTimeout(() => {
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(10px)';
+        setTimeout(() => el.remove(), 200);
+    }, 3500);
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function formatMoney(amount) {
+    return 'RM ' + Number(amount).toFixed(2);
+}
+
+/* ================================================================
+   VIEW RENDERERS
+   ================================================================ */
+function renderApp() {
+    if (!state.user) {
+        document.getElementById('auth-view').classList.remove('hidden');
+        document.getElementById('main-view').classList.add('hidden');
+        renderAuthView();
+    } else {
+        document.getElementById('auth-view').classList.add('hidden');
+        document.getElementById('main-view').classList.remove('hidden');
+        document.getElementById('sidebar-username').textContent = state.user.username;
+        document.getElementById('sidebar-role').textContent = state.user.role === 'admin' ? 'Administrator' : 'Guest';
+        document.getElementById('header-role-badge').textContent = state.user.role === 'admin' ? 'Admin Access' : 'Guest Access';
+        renderSidebar();
+        navigateTo(state.view || 'dashboard');
+    }
+    refreshIcons();
+}
+
+function renderAuthView() {
+    const container = document.getElementById('auth-view');
+    container.innerHTML = `
+        <div class="w-full max-w-md fade-in">
+            <div class="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
+                <div class="p-8">
+                    <div class="text-center mb-8">
+                        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary-100 text-primary-600 mb-4">
+                            <i data-lucide="building-2" class="w-8 h-8"></i>
+                        </div>
+                        <h1 class="text-2xl font-bold text-slate-900">Grand Impiana Hotel</h1>
+                        <p class="text-slate-500 text-sm mt-1">Kuala Lumpur Room Booking System</p>
+                    </div>
+                    
+                    <div class="flex border-b border-slate-200 mb-6">
+                        <button id="tab-login" onclick="switchAuthTab('login')" class="flex-1 pb-3 text-sm font-semibold border-b-2 border-primary-600 text-primary-600">Sign In</button>
+                        <button id="tab-register" onclick="switchAuthTab('register')" class="flex-1 pb-3 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-700">Create Account</button>
+                    </div>
+                    
+                    <form id="login-form" onsubmit="handleLogin(event)" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Username</label>
+                            <div class="relative">
+                                <i data-lucide="user" class="w-4 h-4 absolute left-3 top-3 text-slate-400"></i>
+                                <input type="text" id="login-username" class="w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-sm" placeholder="Enter username" required>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Password</label>
+                            <div class="relative">
+                                <i data-lucide="lock" class="w-4 h-4 absolute left-3 top-3 text-slate-400"></i>
+                                <input type="password" id="login-password" class="w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-sm" placeholder="Enter password" required>
+                            </div>
+                        </div>
+                        <button type="submit" class="w-full bg-primary-600 hover:bg-primary-700 text-white font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2">
+                            <i data-lucide="log-in" class="w-4 h-4"></i>
+                            Sign In
+                        </button>
+                        <div class="text-center text-xs text-slate-400 mt-2">
+                            Admin default: <span class="font-mono text-slate-600">admin / admin123</span>
+                        </div>
+                    </form>
+                    
+                    <form id="register-form" onsubmit="handleRegister(event)" class="space-y-4 hidden">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">New Username</label>
+                            <div class="relative">
+                                <i data-lucide="user-plus" class="w-4 h-4 absolute left-3 top-3 text-slate-400"></i>
+                                <input type="text" id="reg-username" class="w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-sm" placeholder="Choose a username" required>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Password</label>
+                            <div class="relative">
+                                <i data-lucide="lock" class="w-4 h-4 absolute left-3 top-3 text-slate-400"></i>
+                                <input type="password" id="reg-password" class="w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-sm" placeholder="Create a password" required>
+                            </div>
+                        </div>
+                        <button type="submit" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2">
+                            <i data-lucide="user-plus" class="w-4 h-4"></i>
+                            Create Account
+                        </button>
+                    </form>
+                </div>
+                <div class="bg-slate-50 px-8 py-4 border-t border-slate-100 text-center text-xs text-slate-500">
+                    &copy; 2026 Grand Impiana Hotel. All rights reserved.
+                </div>
+            </div>
+        </div>
+    `;
+    refreshIcons();
+}
+
+function switchAuthTab(tab) {
+    const loginForm = document.getElementById('login-form');
+    const regForm = document.getElementById('register-form');
+    const tabLogin = document.getElementById('tab-login');
+    const tabReg = document.getElementById('tab-register');
+    
+    if (tab === 'login') {
+        loginForm.classList.remove('hidden');
+        regForm.classList.add('hidden');
+        tabLogin.className = 'flex-1 pb-3 text-sm font-semibold border-b-2 border-primary-600 text-primary-600';
+        tabReg.className = 'flex-1 pb-3 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-700';
+    } else {
+        loginForm.classList.add('hidden');
+        regForm.classList.remove('hidden');
+        tabLogin.className = 'flex-1 pb-3 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-700';
+        tabReg.className = 'flex-1 pb-3 text-sm font-semibold border-b-2 border-primary-600 text-primary-600';
+    }
+}
+
+function renderSidebar() {
+    const isAdmin = state.user.role === 'admin';
+    const nav = document.getElementById('sidebar-nav');
+    const items = [
+        { id: 'dashboard', label: 'Dashboard', icon: 'layout-dashboard', admin: false },
+        { id: 'book', label: 'Book a Room', icon: 'calendar-plus', admin: false },
+        { id: 'bookings', label: isAdmin ? 'All Bookings' : 'My Bookings', icon: 'clipboard-list', admin: false },
+        { id: 'rooms', label: 'Room Management', icon: 'door-open', admin: true },
+    ];
+    
+    nav.innerHTML = items.filter(item => !item.admin || isAdmin).map(item => `
+        <button onclick="navigateTo('${item.id}')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${state.view === item.id ? 'bg-primary-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}">
+            <i data-lucide="${item.icon}" class="w-4 h-4"></i>
+            ${item.label}
+        </button>
+    `).join('');
+    refreshIcons();
+}
+
+function navigateTo(view) {
+    state.view = view;
+    renderSidebar();
+    const titles = {
+        dashboard: 'Dashboard',
+        rooms: 'Room Management',
+        bookings: state.user.role === 'admin' ? 'All Bookings' : 'My Bookings',
+        book: 'Book a Room'
+    };
+    document.getElementById('page-title').textContent = titles[view] || 'Dashboard';
+    
+    const content = document.getElementById('content-area');
+    content.innerHTML = '<div class="flex items-center justify-center h-64"><div class="animate-spin w-8 h-8 border-4 border-primary-600 border-t-transparent rounded-full"></div></div>';
+    
+    setTimeout(() => {
+        if (view === 'dashboard') renderDashboard(content);
+        else if (view === 'rooms') renderRooms(content);
+        else if (view === 'bookings') renderBookings(content);
+        else if (view === 'book') renderBookForm(content);
+        refreshIcons();
+    }, 150);
+}
+
+/* ================================================================
+   DASHBOARD
+   ================================================================ */
+function renderDashboard(container) {
+    const db = getDB();
+    const isAdmin = state.user.role === 'admin';
+    const allBookings = db.bookings.filter(b => b.active);
+    const myBookings = allBookings.filter(b => b.bookedBy === state.user.username);
+    const activeRooms = db.rooms.filter(r => r.active);
+    const maintenanceRooms = activeRooms.filter(r => r.maintenance);
+    const totalRevenue = allBookings.reduce((sum, b) => sum + b.totalBill, 0);
+    const myRevenue = myBookings.reduce((sum, b) => sum + b.totalBill, 0);
+    
+    const stats = isAdmin ? [
+        { label: 'Total Rooms', value: activeRooms.length, max: CONFIG.MAX_ROOMS, icon: 'building', color: 'blue' },
+        { label: 'Active Bookings', value: allBookings.length, max: CONFIG.MAX_BOOKINGS, icon: 'clipboard-check', color: 'emerald' },
+        { label: 'In Maintenance', value: maintenanceRooms.length, icon: 'wrench', color: 'amber' },
+        { label: 'Total Revenue', value: formatMoney(totalRevenue), icon: 'banknote', color: 'primary' }
+    ] : [
+        { label: 'My Bookings', value: myBookings.length, icon: 'clipboard-list', color: 'emerald' },
+        { label: 'Total Spent', value: formatMoney(myRevenue), icon: 'credit-card', color: 'primary' },
+        { label: 'Available Rooms', value: activeRooms.length - maintenanceRooms.length, icon: 'door-open', color: 'blue' },
+        { label: 'Quick Action', value: 'Book Now', icon: 'calendar-plus', color: 'rose', action: () => navigateTo('book') }
+    ];
+    
+    const colorMap = {
+        blue: 'bg-blue-50 text-blue-600',
+        emerald: 'bg-emerald-50 text-emerald-600',
+        amber: 'bg-amber-50 text-amber-600',
+        primary: 'bg-primary-50 text-primary-600',
+        rose: 'bg-rose-50 text-rose-600'
+    };
+    
+    container.innerHTML = `
+        <div class="space-y-6 fade-in">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                ${stats.map(s => `
+                    <div class="bg-white rounded-xl border border-slate-200 p-5 room-card cursor-default" ${s.action ? `onclick="(${s.action.toString()})()"` : ''}>
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="p-2 rounded-lg ${colorMap[s.color]}">
+                                <i data-lucide="${s.icon}" class="w-5 h-5"></i>
+                            </div>
+                            ${s.max !== undefined ? `<span class="text-xs font-medium text-slate-400">${s.value}/${s.max}</span>` : ''}
+                        </div>
+                        <p class="text-2xl font-bold text-slate-900">${s.value}</p>
+                        <p class="text-sm text-slate-500 mt-0.5">${s.label}</p>
+                    </div>
+                `).join('')}
+            </div>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Recent Bookings -->
+                <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 overflow-hidden">
+                    <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                        <h3 class="font-semibold text-slate-800 flex items-center gap-2">
+                            <i data-lucide="clock" class="w-4 h-4 text-slate-400"></i>
+                            Recent ${isAdmin ? 'Bookings' : 'My Bookings'}
+                        </h3>
+                        <button onclick="navigateTo('bookings')" class="text-sm text-primary-600 hover:text-primary-700 font-medium">View All</button>
+                    </div>
+                    <div class="divide-y divide-slate-100">
+                        ${(isAdmin ? allBookings : myBookings).slice().reverse().slice(0, 5).map(b => {
+                            const room = db.rooms.find(r => r.id === b.roomId);
+                            return `
+                                <div class="px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                                    <div class="flex items-center gap-4">
+                                        <div class="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center text-slate-600 font-bold text-sm">
+                                            ${room ? room.number : '?'}
+                                        </div>
+                                        <div>
+                                            <p class="text-sm font-medium text-slate-900">${escapeHtml(b.guestName)}</p>
+                                            <p class="text-xs text-slate-500">${b.checkIn} • ${b.days} day(s)</p>
+                                        </div>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="text-sm font-semibold text-slate-900">${formatMoney(b.totalBill)}</p>
+                                        <p class="text-xs text-slate-400">${b.bookedBy}</p>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('') || '<div class="px-6 py-8 text-center text-slate-400 text-sm">No bookings yet</div>'}
+                    </div>
+                </div>
+                
+                <!-- Room Status -->
+                <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                    <div class="px-6 py-4 border-b border-slate-100">
+                        <h3 class="font-semibold text-slate-800 flex items-center gap-2">
+                            <i data-lucide="bed" class="w-4 h-4 text-slate-400"></i>
+                            Room Status
+                        </h3>
+                    </div>
+                    <div class="p-6 space-y-3">
+                        ${activeRooms.slice(0, 6).map(r => {
+                            const isBooked = allBookings.some(b => b.active && b.roomId === r.id);
+                            let status = 'Available';
+                            let statusColor = 'bg-emerald-100 text-emerald-700';
+                            if (r.maintenance) { status = 'Maintenance'; statusColor = 'bg-amber-100 text-amber-700'; }
+                            else if (isBooked) { status = 'Occupied'; statusColor = 'bg-rose-100 text-rose-700'; }
+                            return `
+                                <div class="flex items-center justify-between">
+                                    <span class="text-sm font-medium text-slate-700">Room ${r.number}</span>
+                                    <span class="text-xs font-medium px-2.5 py-1 rounded-full ${statusColor}">${status}</span>
+                                </div>
+                            `;
+                        }).join('')}
+                        ${activeRooms.length > 6 ? `<p class="text-xs text-slate-400 text-center pt-2">+${activeRooms.length - 6} more rooms</p>` : ''}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    refreshIcons();
+}
+
+/* ================================================================
+   ROOM MANAGEMENT (Admin Only)
+   ================================================================ */
+function renderRooms(container) {
+    const db = getDB();
+    const rooms = db.rooms.filter(r => r.active).sort((a,b) => a.number - b.number);
+    const activeCount = rooms.length;
+    
+    container.innerHTML = `
+        <div class="space-y-6 fade-in">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                    <p class="text-sm text-slate-500">Manage up to ${CONFIG.MAX_ROOMS} rooms</p>
+                </div>
+                <button onclick="openAddRoomModal()" class="inline-flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
+                    <i data-lucide="plus" class="w-4 h-4"></i>
+                    Add Room
+                </button>
+            </div>
+            
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                ${rooms.map(r => {
+                    const bookingCount = db.bookings.filter(b => b.active && b.roomId === r.id).length;
+                    let cardClass = 'border-slate-200 bg-white';
+                    let statusIcon = 'check-circle';
+                    let statusColor = 'text-emerald-600 bg-emerald-50';
+                    let statusText = 'Available';
+                    
+                    if (r.maintenance) {
+                        cardClass = 'border-amber-300 bg-amber-50/50';
+                        statusIcon = 'wrench';
+                        statusColor = 'text-amber-600 bg-amber-100';
+                        statusText = 'Maintenance';
+                    } else if (bookingCount > 0) {
+                        cardClass = 'border-rose-200 bg-rose-50/30';
+                        statusIcon = 'calendar-check';
+                        statusColor = 'text-rose-600 bg-rose-100';
+                        statusText = 'Booked';
+                    }
+                    
+                    return `
+                        <div class="room-card rounded-xl border ${cardClass} p-4 relative group">
+                            <div class="flex items-center justify-between mb-3">
+                                <span class="text-lg font-bold text-slate-800">#${r.number}</span>
+                                <div class="p-1.5 rounded-md ${statusColor}">
+                                    <i data-lucide="${statusIcon}" class="w-4 h-4"></i>
+                                </div>
+                            </div>
+                            <p class="text-xs font-medium text-slate-500 mb-3">${statusText}</p>
+                            <button onclick="handleToggleMaintenance(${r.id})" class="w-full text-xs font-medium py-1.5 px-2 rounded border border-slate-300 hover:bg-white hover:border-slate-400 transition-colors text-slate-600 flex items-center justify-center gap-1">
+                                <i data-lucide="toggle-${r.maintenance ? 'right' : 'left'}" class="w-3 h-3"></i>
+                                ${r.maintenance ? 'End Maintenance' : 'Set Maintenance'}
+                            </button>
+                        </div>
+                    `;
+                }).join('')}
+                
+                ${activeCount < CONFIG.MAX_ROOMS ? `
+                    <button onclick="openAddRoomModal()" class="room-card rounded-xl border-2 border-dashed border-slate-300 p-4 flex flex-col items-center justify-center text-slate-400 hover:text-primary-600 hover:border-primary-400 hover:bg-primary-50/50 transition-all min-h-[140px]">
+                        <i data-lucide="plus" class="w-8 h-8 mb-2"></i>
+                        <span class="text-sm font-medium">Add Room</span>
+                    </button>
+                ` : ''}
+            </div>
+        </div>
+    `;
+    refreshIcons();
+}
+
+function openAddRoomModal() {
+    const roomNumber = prompt('Enter room number to add (or Cancel to go back):');
+    if (roomNumber === null) return;
+    const num = parseInt(roomNumber, 10);
+    if (isNaN(num) || num <= 0) {
+        showToast('Invalid room number.', 'error');
+        return;
+    }
+    const res = addRoom(num);
+    showToast(res.msg, res.ok ? 'success' : 'error');
+    if (res.ok) renderRooms(document.getElementById('content-area'));
+}
+
+function handleToggleMaintenance(roomId) {
+    const res = toggleMaintenance(roomId);
+    showToast(res.msg, res.ok ? 'success' : 'error');
+    if (res.ok) renderRooms(document.getElementById('content-area'));
+}
+
+/* ================================================================
+   BOOKINGS LIST
+   ================================================================ */
+function renderBookings(container) {
+    const isAdmin = state.user.role === 'admin';
+    const bookings = isAdmin ? getAllBookings() : getMyBookings(state.user.username);
+    
+    container.innerHTML = `
+        <div class="space-y-4 fade-in">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <p class="text-sm text-slate-500">
+                    ${isAdmin ? 'Viewing all system bookings' : 'Viewing your personal bookings'}
+                </p>
+                <button onclick="navigateTo('book')" class="inline-flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
+                    <i data-lucide="plus" class="w-4 h-4"></i>
+                    New Booking
+                </button>
+            </div>
+            
+            <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left">
+                        <thead class="bg-slate-50 text-slate-600 font-medium border-b border-slate-200">
+                            <tr>
+                                <th class="px-6 py-3">ID</th>
+                                ${isAdmin ? '<th class="px-6 py-3">Booked By</th>' : ''}
+                                <th class="px-6 py-3">Room</th>
+                                <th class="px-6 py-3">Guest</th>
+                                <th class="px-6 py-3">Check-in</th>
+                                <th class="px-6 py-3">Check-out</th>
+                                <th class="px-6 py-3">Days</th>
+                                <th class="px-6 py-3 text-right">Total Bill</th>
+                                <th class="px-6 py-3 text-center">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            ${bookings.length === 0 ? `
+                                <tr>
+                                    <td colspan="${isAdmin ? 9 : 8}" class="px-6 py-12 text-center text-slate-400">
+                                        <i data-lucide="inbox" class="w-10 h-10 mx-auto mb-2 opacity-50"></i>
+                                        <p>No bookings found.</p>
+                                    </td>
+                                </tr>
+                            ` : bookings.map(b => `
+                                <tr class="hover:bg-slate-50 transition-colors">
+                                    <td class="px-6 py-4 font-medium text-slate-900">#${b.id}</td>
+                                    ${isAdmin ? `<td class="px-6 py-4 text-slate-600">${escapeHtml(b.bookedBy)}</td>` : ''}
+                                    <td class="px-6 py-4"><span class="font-semibold text-slate-800">${b.roomNumber}</span></td>
+                                    <td class="px-6 py-4 text-slate-700">${escapeHtml(b.guestName)}</td>
+                                    <td class="px-6 py-4 text-slate-600">${b.checkIn}</td>
+                                    <td class="px-6 py-4 text-slate-600">${b.checkOut}</td>
+                                    <td class="px-6 py-4"><span class="px-2 py-1 bg-slate-100 rounded-md text-xs font-medium text-slate-600">${b.days} day(s)</span></td>
+                                    <td class="px-6 py-4 text-right font-semibold text-slate-900">${formatMoney(b.totalBill)}</td>
+                                    <td class="px-6 py-4">
+                                        <div class="flex items-center justify-center gap-2">
+                                            <button onclick="openEditModal(${b.id})" class="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Edit">
+                                                <i data-lucide="pencil" class="w-4 h-4"></i>
+                                            </button>
+                                            <button onclick="handleCancel(${b.id})" class="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors" title="Cancel">
+                                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `;
+    refreshIcons();
+}
+
+function handleCancel(bookingId) {
+    if (!confirm('Are you sure you want to cancel this booking?')) return;
+    const res = cancelBooking(bookingId);
+    showToast(res.msg, res.ok ? 'success' : 'error');
+    if (res.ok) renderBookings(document.getElementById('content-area'));
+}
+
+/* ================================================================
+   BOOK / EDIT FORM
+   ================================================================ */
+function renderBookForm(container, editBookingId = null) {
+    const db = getDB();
+    let booking = null;
+    if (editBookingId) {
+        const raw = db.bookings.find(b => b.id === editBookingId && b.active);
+        if (raw) booking = enrichBooking(raw, db);
+    }
+    
+    const isEdit = !!booking;
+    const heading = isEdit ? 'Edit Booking' : 'Book a Room';
+    const subheading = isEdit ? `Modify booking #${booking.id}` : 'Select your dates and preferred room';
+    
+    // Pre-fill values
+    const guestName = isEdit ? booking.guestName : '';
+    const checkInISO = isEdit ? toISODate(booking.checkIn) : todayISO();
+    const days = isEdit ? booking.days : 1;
+    const selectedRoomId = isEdit ? booking.roomId : '';
+    
+    container.innerHTML = `
+        <div class="max-w-2xl mx-auto fade-in">
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                    <h3 class="font-semibold text-slate-800 flex items-center gap-2">
+                        <i data-lucide="${isEdit ? 'pencil' : 'calendar-plus'}" class="w-5 h-5 text-primary-600"></i>
+                        ${heading}
+                    </h3>
+                    <p class="text-sm text-slate-500 mt-0.5">${subheading}</p>
+                </div>
+                
+                <form id="booking-form" onsubmit="handleBookingSubmit(event, ${editBookingId || 'null'})" class="p-6 space-y-5">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div class="md:col-span-2">
+                            <label class="block text-sm font-medium text-slate-700 mb-1.5">Guest Name</label>
+                            <input type="text" id="bf-guest" value="${escapeHtml(guestName)}" class="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-sm" placeholder="Enter guest full name" required>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1.5">Check-in Date</label>
+                            <input type="date" id="bf-date" value="${checkInISO}" min="${todayISO()}" class="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-sm" required onchange="updateRoomOptions()">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1.5">Duration (nights)</label>
+                            <input type="number" id="bf-days" value="${days}" min="1" max="365" class="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-sm" required onchange="updateRoomOptions()">
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-2">Select Room</label>
+                        <div id="room-selector" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                            <!-- Populated by JS -->
+                        </div>
+                        <input type="hidden" id="bf-room" value="${selectedRoomId}" required>
+                        <p id="room-error" class="text-xs text-rose-600 mt-2 hidden">Please select an available room.</p>
+                    </div>
+                    
+                    <div class="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                        <div class="flex items-center justify-between text-sm">
+                            <span class="text-slate-600">Rate per night</span>
+                            <span class="font-medium text-slate-900">${formatMoney(CONFIG.RATE_PER_NIGHT)}</span>
+                        </div>
+                        <div class="flex items-center justify-between text-sm mt-2 pt-2 border-t border-slate-200">
+                            <span class="text-slate-600">Estimated Total</span>
+                            <span class="text-lg font-bold text-primary-700" id="bf-estimate">${formatMoney(days * CONFIG.RATE_PER_NIGHT)}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center gap-3 pt-2">
+                        <button type="submit" class="flex-1 bg-primary-600 hover:bg-primary-700 text-white font-medium py-2.5 rounded-lg transition-colors shadow-sm flex items-center justify-center gap-2">
+                            <i data-lucide="${isEdit ? 'save' : 'check'}" class="w-4 h-4"></i>
+                            ${isEdit ? 'Update Booking' : 'Confirm Booking'}
+                        </button>
+                        <button type="button" onclick="navigateTo('bookings')" class="px-5 py-2.5 border border-slate-300 text-slate-700 font-medium rounded-lg hover:bg-slate-50 transition-colors text-sm">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    
+    // Attach listeners for estimate updates
+    setTimeout(() => {
+        const daysInput = document.getElementById('bf-days');
+        if (daysInput) {
+            daysInput.addEventListener('input', () => {
+                const d = parseInt(daysInput.value) || 1;
+                document.getElementById('bf-estimate').textContent = formatMoney(d * CONFIG.RATE_PER_NIGHT);
+            });
+        }
+        updateRoomOptions();
+    }, 0);
+    refreshIcons();
+}
+
+function updateRoomOptions() {
+    const dateInput = document.getElementById('bf-date');
+    const daysInput = document.getElementById('bf-days');
+    const selector = document.getElementById('room-selector');
+    const hidden = document.getElementById('bf-room');
+    if (!dateInput || !daysInput || !selector) return;
+    
+    const isoDate = dateInput.value;
+    const days = parseInt(daysInput.value) || 1;
+    const checkIn = fromISODate(isoDate);
+    const db = getDB();
+    const currentRoomId = hidden ? parseInt(hidden.value) : 0;
+    const editBookingId = hidden ? parseInt(hidden.dataset.editId || '0') : 0;
+    
+    // If invalid date, don't render
+    if (!checkIn || checkIn.length !== 10) {
+        selector.innerHTML = '<p class="col-span-full text-sm text-slate-400 italic">Select a valid check-in date to see available rooms.</p>';
+        return;
+    }
+    
+    const rooms = db.rooms.filter(r => r.active).sort((a,b) => a.number - b.number);
+    
+    selector.innerHTML = rooms.map(r => {
+        const isMaint = r.maintenance;
+        const hasConflict = !isMaint && hasBookingConflict(r.id, checkIn, days, editBookingId);
+        const isAvail = !isMaint && !hasConflict;
+        const isSelected = currentRoomId === r.id;
+        
+        let classes = 'border rounded-lg p-3 cursor-pointer transition-all text-center relative ';
+        let icon = '';
+        let label = '';
+        
+        if (isMaint) {
+            classes += 'border-amber-200 bg-amber-50/50 opacity-60 cursor-not-allowed';
+            icon = '<i data-lucide="wrench" class="w-5 h-5 text-amber-500 mx-auto mb-1"></i>';
+            label = '<span class="text-xs font-medium text-amber-700">Maintenance</span>';
+        } else if (hasConflict) {
+            classes += 'border-rose-200 bg-rose-50/30 opacity-60 cursor-not-allowed';
+            icon = '<i data-lucide="x-circle" class="w-5 h-5 text-rose-500 mx-auto mb-1"></i>';
+            label = '<span class="text-xs font-medium text-rose-700">Booked</span>';
+        } else if (isSelected) {
+            classes += 'border-primary-500 bg-primary-50 ring-2 ring-primary-200';
+            icon = '<i data-lucide="check-circle" class="w-5 h-5 text-primary-600 mx-auto mb-1"></i>';
+            label = '<span class="text-xs font-medium text-primary-700">Selected</span>';
+        } else {
+            classes += 'border-slate-200 bg-white hover:border-primary-400 hover:shadow-md';
+            icon = '<i data-lucide="door-open" class="w-5 h-5 text-slate-400 mx-auto mb-1"></i>';
+            label = '<span class="text-xs font-medium text-slate-600">Available</span>';
+        }
+        
+        const onclick = isAvail ? `selectRoom(${r.id})` : '';
+        
+        return `
+            <div class="${classes}" onclick="${onclick}">
+                ${icon}
+                <p class="text-base font-bold text-slate-800">#${r.number}</p>
+                ${label}
+            </div>
+        `;
+    }).join('');
+    
+    refreshIcons();
+}
+
+function selectRoom(roomId) {
+    document.getElementById('bf-room').value = roomId;
+    updateRoomOptions();
+    document.getElementById('room-error').classList.add('hidden');
+}
+
+function handleBookingSubmit(e, editId) {
+    e.preventDefault();
+    const guest = document.getElementById('bf-guest').value.trim();
+    const dateISO = document.getElementById('bf-date').value;
+    const days = parseInt(document.getElementById('bf-days').value);
+    const roomId = parseInt(document.getElementById('bf-room').value);
+    
+    if (!guest) { showToast('Guest name is required.', 'error'); return; }
+    if (!dateISO) { showToast('Check-in date is required.', 'error'); return; }
+    if (!days || days < 1) { showToast('Duration must be at least 1 day.', 'error'); return; }
+    if (!roomId) {
+        document.getElementById('room-error').classList.remove('hidden');
+        showToast('Please select an available room.', 'error');
+        return;
+    }
+    
+    const checkIn = fromISODate(dateISO);
+    
+    if (editId) {
+        const res = updateBooking(editId, { guestName: guest, checkIn, days, roomId });
+        showToast(res.msg, res.ok ? 'success' : 'error');
+        if (res.ok) navigateTo('bookings');
+    } else {
+        const res = createBooking({
+            roomId, guestName: guest, checkIn, days,
+            bookedBy: state.user.username
+        });
+        showToast(res.msg, res.ok ? 'success' : 'error');
+        if (res.ok) navigateTo('bookings');
+    }
+}
+
+function openEditModal(bookingId) {
+    // Reuse book form but in edit mode
+    state.view = 'book';
+    renderSidebar();
+    document.getElementById('page-title').textContent = 'Edit Booking';
+    renderBookForm(document.getElementById('content-area'), bookingId);
+}
+
+/* ================================================================
+   EVENT HANDLERS
+   ================================================================ */
+function handleLogin(e) {
+    e.preventDefault();
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+    const user = login(username, password);
+    if (user) {
+        state.user = user;
+        state.view = 'dashboard';
+        showToast(`Welcome back, ${user.username}!`, 'success');
+        renderApp();
+    } else {
+        showToast('Invalid credentials. Please try again.', 'error');
+    }
+}
+
+function handleRegister(e) {
+    e.preventDefault();
+    const username = document.getElementById('reg-username').value.trim();
+    const password = document.getElementById('reg-password').value;
+    const res = registerAccount(username, password);
+    showToast(res.msg, res.ok ? 'success' : 'error');
+    if (res.ok) {
+        document.getElementById('reg-username').value = '';
+        document.getElementById('reg-password').value = '';
+        switchAuthTab('login');
+    }
+}
+
+function handleLogout() {
+    state.user = null;
+    state.view = 'auth';
+    showToast('Signed out successfully.', 'info');
+    renderApp();
+}
+
+function toggleMobileSidebar() {
+    const sidebar = document.querySelector('aside');
+    sidebar.classList.toggle('hidden');
+    sidebar.classList.toggle('fixed');
+    sidebar.classList.toggle('inset-0');
+    sidebar.classList.toggle('z-50');
+}
+
+/* ================================================================
+   INITIALIZATION
+   ================================================================ */
+document.addEventListener('DOMContentLoaded', () => {
+    initDB();
+    renderApp();
+});
+</script>
+</body>
+</html>
