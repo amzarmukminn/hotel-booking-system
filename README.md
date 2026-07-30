@@ -2,6 +2,8 @@
 
 > **University Project - Full-Stack Web Application**  
 > Originally developed as a C++ console application, migrated to a modern responsive web platform.
+>
+> Live Demo: https://amzarmukminn.github.io/hotel-booking-system/
 
 [![HTML5](https://img.shields.io/badge/HTML5-E34F26?logo=html5&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/HTML)
 [![CSS3](https://img.shields.io/badge/CSS3-1572B6?logo=css3&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/CSS)
